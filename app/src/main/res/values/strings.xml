@@ -1,5 +1,16 @@
 <resources>
     <string name="app_name">Weather Flex Alarm</string>
+    <string name="title_main">天气联动闹钟</string>
+    <string name="subtitle_main">实时天气可见，闹钟触发更可控</string>
+    <string name="section_weather">天气信息</string>
+    <string name="weather_loading">正在刷新天气…</string>
+    <string name="weather_now_placeholder">当前天气：--</string>
+    <string name="weather_alarm_placeholder">闹钟时段天气：--</string>
+    <string name="weather_updated_placeholder">上次刷新：--</string>
+    <string name="refresh_weather">刷新天气</string>
+    <string name="section_alarm">闹钟配置</string>
+    <string name="section_actions">快捷操作</string>
+    <string name="section_status">状态</string>
     <string name="choose_time">选择基础闹钟时间</string>
     <string name="advance_minutes_hint">异常天气提前分钟数（默认20）</string>
     <string name="advance_rain">下雨时提前</string>

@@ -21,6 +21,7 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.ZonedDateTime
 import java.util.Locale
+import kotlin.concurrent.thread
 
 class MainActivity : ComponentActivity() {
 
@@ -31,10 +32,14 @@ class MainActivity : ComponentActivity() {
     private lateinit var latitudeInput: EditText
     private lateinit var longitudeInput: EditText
     private lateinit var statusText: TextView
+    private lateinit var weatherNowText: TextView
+    private lateinit var weatherAlarmText: TextView
+    private lateinit var weatherUpdatedText: TextView
     private lateinit var requestExactAlarmPermissionButton: Button
 
     private var selectedHour = 7
     private var selectedMinute = 30
+    private var lastWeatherRefreshMillis = 0L
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -53,6 +58,7 @@ class MainActivity : ComponentActivity() {
         longitudeInput.setText(settings.longitude.toString())
         renderTime()
         renderStatus()
+        refreshWeatherCard(force = true)
 
         findViewById<Button>(R.id.pickTimeButton).setOnClickListener {
             TimePickerDialog(
@@ -70,6 +76,10 @@ class MainActivity : ComponentActivity() {
 
         findViewById<Button>(R.id.useLocationButton).setOnClickListener {
             fillLocationFromDevice()
+        }
+
+        findViewById<Button>(R.id.refreshWeatherButton).setOnClickListener {
+            refreshWeatherCard(force = true)
         }
 
         requestExactAlarmPermissionButton.setOnClickListener {
@@ -95,6 +105,7 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         updateExactAlarmPermissionButton()
         renderStatus()
+        refreshWeatherCard()
     }
 
     private fun bindViews() {
@@ -105,6 +116,9 @@ class MainActivity : ComponentActivity() {
         latitudeInput = findViewById(R.id.latitudeInput)
         longitudeInput = findViewById(R.id.longitudeInput)
         statusText = findViewById(R.id.statusText)
+        weatherNowText = findViewById(R.id.weatherNowText)
+        weatherAlarmText = findViewById(R.id.weatherAlarmText)
+        weatherUpdatedText = findViewById(R.id.weatherUpdatedText)
         requestExactAlarmPermissionButton = findViewById(R.id.requestExactAlarmPermissionButton)
     }
 
@@ -136,6 +150,7 @@ class MainActivity : ComponentActivity() {
         AlarmScheduler(this).schedule(baseTime, "基础闹钟（已保存）")
         WeatherWorkScheduler.scheduleAll(this)
         statusText.text = withAlarmVolumeHint("已保存，正在按天气重算闹钟...")
+        refreshWeatherCard(force = true)
     }
 
     private fun fillLocationFromDevice() {
@@ -157,6 +172,7 @@ class MainActivity : ComponentActivity() {
             latitudeInput.setText(location.latitude.toString())
             longitudeInput.setText(location.longitude.toString())
             statusText.text = withAlarmVolumeHint("已填入当前位置")
+            refreshWeatherCard(force = true)
         } else {
             statusText.text = withAlarmVolumeHint("未拿到定位，请手动填写经纬度")
         }
@@ -218,6 +234,82 @@ class MainActivity : ComponentActivity() {
         statusText.text = withAlarmVolumeHint("下次闹钟：$time\n原因：$reason")
     }
 
+    private fun buildPreviewSettings(): AlarmSettings {
+        val current = SettingsStore.load(this)
+        val advanceMinutes = advanceMinutesInput.text.toString().toIntOrNull()?.coerceAtLeast(0)
+            ?: current.advanceMinutes
+        val latitude = latitudeInput.text.toString().toDoubleOrNull() ?: current.latitude
+        val longitude = longitudeInput.text.toString().toDoubleOrNull() ?: current.longitude
+
+        return AlarmSettings(
+            baseHour = selectedHour,
+            baseMinute = selectedMinute,
+            advanceMinutes = advanceMinutes,
+            advanceOnRain = rainCheck.isChecked,
+            advanceOnSnow = snowCheck.isChecked,
+            latitude = latitude,
+            longitude = longitude
+        )
+    }
+
+    private fun refreshWeatherCard(force: Boolean = false) {
+        val nowMillis = System.currentTimeMillis()
+        if (!force && nowMillis - lastWeatherRefreshMillis < WEATHER_REFRESH_THROTTLE_MS) {
+            return
+        }
+
+        val settings = buildPreviewSettings()
+        weatherNowText.text = getString(R.string.weather_loading)
+        weatherAlarmText.text = getString(R.string.weather_alarm_placeholder)
+        weatherUpdatedText.text = getString(R.string.weather_updated_placeholder)
+
+        thread(name = "weather-refresh") {
+            try {
+                val points = WeatherClient.fetchHourlyWeather(settings.latitude, settings.longitude)
+                val now = ZonedDateTime.now()
+                val baseTime = AlarmMath.nextBaseAlarmTime(settings, now)
+                val nowCode = WeatherClient.nearestWeatherCode(points, now)
+                val alarmCode = WeatherClient.nearestWeatherCode(points, baseTime)
+                val shouldAdvance = alarmCode?.let { WeatherClassifier.shouldAdvance(it, settings) } ?: false
+
+                val nowLine = if (nowCode == null) {
+                    "当前天气：暂无数据"
+                } else {
+                    "当前天气：${WeatherClassifier.weatherDetailLabel(nowCode)}（代码 $nowCode）"
+                }
+
+                val baseTimeText = baseTime.format(DateTimeFormatter.ofPattern("MM-dd HH:mm"))
+                val alarmWeather = if (alarmCode == null) {
+                    "暂无数据"
+                } else {
+                    "${WeatherClassifier.weatherDetailLabel(alarmCode)}（代码 $alarmCode）"
+                }
+                val alarmDecision = when {
+                    alarmCode == null -> "无法判断是否提前（天气数据缺失）"
+                    shouldAdvance -> "预计会提前 ${settings.advanceMinutes} 分钟响铃"
+                    else -> "预计按基础时间响铃"
+                }
+                val alarmLine = "闹钟时段天气：$alarmWeather（$baseTimeText）\n$alarmDecision"
+                val updatedLine = "上次刷新：${now.format(DateTimeFormatter.ofPattern("HH:mm:ss"))}"
+
+                runOnUiThread {
+                    if (isFinishing || isDestroyed) return@runOnUiThread
+                    weatherNowText.text = nowLine
+                    weatherAlarmText.text = alarmLine
+                    weatherUpdatedText.text = updatedLine
+                    lastWeatherRefreshMillis = System.currentTimeMillis()
+                }
+            } catch (_: Exception) {
+                runOnUiThread {
+                    if (isFinishing || isDestroyed) return@runOnUiThread
+                    weatherNowText.text = "当前天气：刷新失败"
+                    weatherAlarmText.text = "闹钟时段天气：刷新失败，请检查网络或经纬度设置"
+                    weatherUpdatedText.text = "上次刷新：失败"
+                }
+            }
+        }
+    }
+
     private fun withAlarmVolumeHint(base: String): String {
         val audioManager = getSystemService(AudioManager::class.java)
         val alarmVolume = audioManager.getStreamVolume(AudioManager.STREAM_ALARM)
@@ -231,5 +323,6 @@ class MainActivity : ComponentActivity() {
     companion object {
         private const val REQ_LOCATION = 2001
         private const val REQ_NOTIFICATION = 2002
+        private const val WEATHER_REFRESH_THROTTLE_MS = 90_000L
     }
 }
