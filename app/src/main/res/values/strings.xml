@@ -1,0 +1,15 @@
+<resources>
+    <string name="app_name">Weather Flex Alarm</string>
+    <string name="choose_time">选择基础闹钟时间</string>
+    <string name="advance_minutes_hint">异常天气提前分钟数（默认20）</string>
+    <string name="advance_rain">下雨时提前</string>
+    <string name="advance_snow">下雪时提前</string>
+    <string name="latitude_hint">纬度（如 31.2304）</string>
+    <string name="longitude_hint">经度（如 121.4737）</string>
+    <string name="use_current_location">使用当前位置</string>
+    <string name="save_and_schedule">保存并重算闹钟</string>
+    <string name="test_ring_now">立即测试响铃</string>
+    <string name="stop_ring_now">停止响铃</string>
+    <string name="request_exact_alarm_permission">授予精确闹钟权限</string>
+    <string name="status_default">等待设置</string>
+</resources>
